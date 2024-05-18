@@ -1,9 +1,9 @@
-use std::cmp::Ordering;
+use alloc::vec::Vec;
+use core::cmp::Ordering;
 
-use crate::line_number::LineNumber;
 use itertools::Itertools;
 
-use crate::program_counter::ProgramCounter;
+use crate::{line_number::LineNumber, program_counter::ProgramCounter};
 
 /// Table that models the relationship between program counters and line numbers in the source code.
 /// Entries are sorted by program counter. A table with two entries, the first starting at 0 and
@@ -42,7 +42,7 @@ pub struct LineNumberTableEntry {
 
 impl PartialOrd for LineNumberTableEntry {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.program_counter.partial_cmp(&other.program_counter)
+        Some(self.cmp(other))
     }
 }
 
@@ -63,6 +63,8 @@ impl LineNumberTableEntry {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use crate::{
         line_number::LineNumber,
         line_number_table::{LineNumberTable, LineNumberTableEntry},

@@ -1,4 +1,5 @@
-use std::ops::Range;
+use alloc::{string::String, vec::Vec};
+use core::ops::Range;
 
 use crate::program_counter::ProgramCounter;
 
@@ -34,6 +35,8 @@ pub struct ExceptionTableEntry {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{string::ToString, vec};
+
     use crate::{
         exception_table::{ExceptionTable, ExceptionTableEntry},
         program_counter::ProgramCounter,

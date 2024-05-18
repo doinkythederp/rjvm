@@ -1,4 +1,5 @@
-use std::{fmt, fmt::Formatter, str::Chars};
+use alloc::{string::ToString, vec::Vec};
+use core::{fmt, fmt::Formatter, str::Chars};
 
 use itertools::Itertools;
 
@@ -90,6 +91,8 @@ impl MethodDescriptor {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{boxed::Box, format, string::ToString, vec};
+
     use crate::{
         class_reader_error::ClassReaderError,
         field_type::{BaseType, FieldType},

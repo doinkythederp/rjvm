@@ -1,4 +1,5 @@
-use std::{fmt, fmt::Formatter};
+use alloc::{string::String, vec::Vec};
+use core::{fmt, fmt::Formatter};
 
 /// An attribute in the class file, which can belong to a class, field, method, or code block.
 #[derive(Debug, Default, PartialEq)]

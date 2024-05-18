@@ -6,13 +6,13 @@ pub trait ToUsizeSafe {
 
 impl ToUsizeSafe for u8 {
     fn into_usize_safe(self) -> usize {
-        usize::try_from(self).expect("usize should have at least 8 bits")
+        usize::from(self)
     }
 }
 
 impl ToUsizeSafe for u16 {
     fn into_usize_safe(self) -> usize {
-        usize::try_from(self).expect("usize should have at least 16 bits")
+        usize::from(self)
     }
 }
 

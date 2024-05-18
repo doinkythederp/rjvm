@@ -1,5 +1,6 @@
 bitflags! {
     /// Class flags
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
     pub struct ClassAccessFlags: u16 {
         const PUBLIC = 0x0001;
         const FINAL = 0x0010;

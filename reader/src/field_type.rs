@@ -1,7 +1,10 @@
-use std::{fmt, fmt::Formatter, str::Chars};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+};
+use core::{fmt, fmt::Formatter, str::Chars};
 
 use itertools::Itertools;
-
 use ClassReaderError::InvalidTypeDescriptor;
 
 use crate::class_reader_error::ClassReaderError;
@@ -90,6 +93,8 @@ impl FieldType {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{boxed::Box, format, string::ToString};
+
     use crate::{
         class_reader_error::ClassReaderError,
         field_type::{BaseType, FieldType},

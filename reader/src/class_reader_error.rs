@@ -1,4 +1,5 @@
-use std::{
+use alloc::string::{String, ToString};
+use core::{
     error::Error,
     fmt::{Display, Formatter},
 };
@@ -22,7 +23,7 @@ impl ClassReaderError {
 }
 
 impl Display for ClassReaderError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
             ClassReaderError::InvalidClassData(details, _) => {
                 write!(f, "invalid class file: {details}")
@@ -46,7 +47,7 @@ impl Error for ClassReaderError {
     }
 }
 
-pub type Result<T> = std::result::Result<T, ClassReaderError>;
+pub type Result<T> = core::result::Result<T, ClassReaderError>;
 
 impl From<InvalidConstantPoolIndexError> for ClassReaderError {
     fn from(err: InvalidConstantPoolIndexError) -> Self {

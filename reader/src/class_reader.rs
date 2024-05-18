@@ -1,8 +1,15 @@
+use alloc::{
+    borrow::ToOwned,
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
+
 use log::warn;
-use result::prelude::*;
 
 use crate::{
     attribute::Attribute,
+    buffer::Buffer,
     class_access_flags::ClassAccessFlags,
     class_file::ClassFile,
     class_file_field::{ClassFileField, FieldConstantValue},
@@ -18,8 +25,8 @@ use crate::{
     method_descriptor::MethodDescriptor,
     method_flags::MethodFlags,
     program_counter::ProgramCounter,
+    type_conversion::ToUsizeSafe,
 };
-use crate::{buffer::Buffer, type_conversion::ToUsizeSafe};
 
 /// A reader of a byte array representing a class. Supports only a subset of Java 7 class format,
 /// in particular it does not support generics.
@@ -282,7 +289,7 @@ impl<'a> ClassFileReader<'a> {
             .iter()
             .filter(|attr| attr.name == "ConstantValue")
             .map(|attr| {
-                if attr.bytes.len() != std::mem::size_of::<u16>() {
+                if attr.bytes.len() != core::mem::size_of::<u16>() {
                     Err(ClassReaderError::invalid_class_data(
                         "invalid attribute of type ConstantValue".to_string(),
                     ))
@@ -309,7 +316,7 @@ impl<'a> ClassFileReader<'a> {
                 }
             })
             .next()
-            .invert()
+            .transpose()
     }
 
     fn search_deprecated_attribute(&self, raw_attributes: &[Attribute]) -> bool {
@@ -391,7 +398,7 @@ impl<'a> ClassFileReader<'a> {
                 })
             })
             .next()
-            .invert()?
+            .transpose()?
             .ok_or_else(|| {
                 ClassReaderError::invalid_class_data(format!(
                     "method {name} is missing code attribute"
@@ -442,7 +449,7 @@ impl<'a> ClassFileReader<'a> {
                 }
                 Ok(LineNumberTable::new(entries))
             })
-            .invert()
+            .transpose()
     }
 
     fn extract_thrown_exceptions(&self, raw_attributes: &[Attribute]) -> Result<Vec<String>> {
@@ -488,7 +495,7 @@ impl<'a> ClassFileReader<'a> {
                         )),
                     })
             })
-            .invert()
+            .transpose()
     }
 
     fn read_raw_attributes(&mut self) -> Result<Vec<Attribute>> {
@@ -524,6 +531,8 @@ pub fn read_buffer(buf: &[u8]) -> Result<ClassFile> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use crate::{class_reader::read_buffer, class_reader_error::ClassReaderError};
 
     #[test]

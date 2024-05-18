@@ -1,5 +1,11 @@
-use std::{fmt, vec::Vec};
-use thiserror::Error;
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
+use core::fmt;
+
+use snafu::Snafu;
 
 /// Types of a constant in the constant pool of a class, following the JVM spec:
 /// https://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.4
@@ -34,8 +40,8 @@ pub struct ConstantPool {
 }
 
 /// Error used to signal that an attempt was made to access a non existing constant pool entry.
-#[derive(Error, Debug, PartialEq, Eq)]
-#[error("invalid constant pool index: {index}")]
+#[derive(Snafu, Debug, PartialEq, Eq)]
+#[snafu(display("invalid constant pool index: {index}"))]
 pub struct InvalidConstantPoolIndexError {
     pub index: u16,
 }
@@ -170,7 +176,7 @@ impl fmt::Display for ConstantPool {
         writeln!(f, "Constant pool: (size: {})", self.entries.len())?;
         for (raw_idx, _) in self.entries.iter().enumerate() {
             let index = (raw_idx + 1) as u16;
-            let entry_text = self.fmt_entry(index).map_err(|_| fmt::Error::default())?;
+            let entry_text = self.fmt_entry(index).map_err(|_| fmt::Error)?;
             writeln!(f, "    {}, {}", index, entry_text)?;
         }
         Ok(())
@@ -179,6 +185,8 @@ impl fmt::Display for ConstantPool {
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::ToString;
+
     use crate::constant_pool::{ConstantPool, ConstantPoolEntry, InvalidConstantPoolIndexError};
 
     #[test]

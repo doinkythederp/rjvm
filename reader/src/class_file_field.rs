@@ -1,4 +1,5 @@
-use std::{fmt, fmt::Formatter};
+use alloc::string::String;
+use core::{fmt, fmt::Formatter};
 
 use crate::{field_flags::FieldFlags, field_type::FieldType};
 

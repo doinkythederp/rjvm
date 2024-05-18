@@ -1,4 +1,5 @@
-use std::fmt;
+use alloc::{string::String, vec::Vec};
+use core::fmt;
 
 use crate::{
     class_access_flags::ClassAccessFlags, class_file_field::ClassFileField,

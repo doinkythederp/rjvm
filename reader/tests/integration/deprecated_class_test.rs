@@ -1,7 +1,8 @@
 extern crate rjvm_reader;
 
-use crate::utils;
 use utils::read_class_from_bytes;
+
+use crate::utils;
 
 #[test_log::test]
 fn can_read_deprecated_attribute() {

@@ -1,4 +1,5 @@
-use std::{fmt, fmt::Formatter};
+use alloc::{string::String, vec::Vec};
+use core::{fmt, fmt::Formatter};
 
 use crate::{
     attribute::Attribute,
