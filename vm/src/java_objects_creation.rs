@@ -8,7 +8,6 @@ use crate::{
     array_entry_type::ArrayEntryType,
     call_stack::CallStack,
     exceptions::MethodCallFailed,
-    io::JvmIo,
     object::Object,
     stack_trace_element::StackTraceElement,
     value::Value,
@@ -19,7 +18,6 @@ use crate::{
 /// Creates a new instance of a `java.lang.String` with the given content
 pub fn new_java_lang_string_object<'a>(
     vm: &mut Vm<'a>,
-    fs: &dyn JvmIo,
     call_stack: &mut CallStack<'a>,
     content: &str,
 ) -> Result<AbstractObject<'a>, MethodCallFailed<'a>> {
@@ -42,7 +40,7 @@ pub fn new_java_lang_string_object<'a>(
     //    public static final Comparator<String> CASE_INSENSITIVE_ORDER = new CaseInsensitiveComparator();
     //    private static final int HASHING_SEED;
     //    private transient int hash32;
-    let string_object = vm.new_object(fs, call_stack, "java/lang/String")?;
+    let string_object = vm.new_object(call_stack, "java/lang/String")?;
     string_object.set_field(0, Value::Object(java_array));
     string_object.set_field(1, Value::Int(0));
     string_object.set_field(6, Value::Int(0));
@@ -67,39 +65,33 @@ pub fn extract_str_from_java_lang_string<'a>(
 
 pub fn new_java_lang_class_object<'a>(
     vm: &mut Vm<'a>,
-    fs: &dyn JvmIo,
     call_stack: &mut CallStack<'a>,
     class_name: &str,
 ) -> Result<AbstractObject<'a>, MethodCallFailed<'a>> {
-    let class_object = vm.new_object(fs, call_stack, "java/lang/Class")?;
+    let class_object = vm.new_object(call_stack, "java/lang/Class")?;
     // TODO: build a proper instance of Class object
-    let string_object = new_java_lang_string_object(vm, fs, call_stack, class_name)?;
+    let string_object = new_java_lang_string_object(vm, call_stack, class_name)?;
     class_object.set_field(5, Value::Object(string_object));
     Ok(class_object)
 }
 
 pub fn new_java_lang_stack_trace_element_object<'a>(
     vm: &mut Vm<'a>,
-    fs: &dyn JvmIo,
     call_stack: &mut CallStack<'a>,
     stack_trace_element: &StackTraceElement<'a>,
 ) -> Result<AbstractObject<'a>, MethodCallFailed<'a>> {
     let class_name = Value::Object(new_java_lang_string_object(
         vm,
-        fs,
         call_stack,
         stack_trace_element.class_name,
     )?);
     let method_name = Value::Object(new_java_lang_string_object(
         vm,
-        fs,
         call_stack,
         stack_trace_element.method_name,
     )?);
     let file_name = match stack_trace_element.source_file {
-        Some(file_name) => {
-            Value::Object(new_java_lang_string_object(vm, fs, call_stack, file_name)?)
-        }
+        Some(file_name) => Value::Object(new_java_lang_string_object(vm, call_stack, file_name)?),
         _ => Value::Null,
     };
     let line_number = Value::Int(stack_trace_element.line_number.unwrap_or(LineNumber(0)).0 as i32);
@@ -110,7 +102,7 @@ pub fn new_java_lang_stack_trace_element_object<'a>(
     //     private String fileName;
     //     private int    lineNumber;
     let stack_trace_element_java_object =
-        vm.new_object(fs, call_stack, "java/lang/StackTraceElement")?;
+        vm.new_object(call_stack, "java/lang/StackTraceElement")?;
     stack_trace_element_java_object.set_field(0, class_name);
     stack_trace_element_java_object.set_field(1, method_name);
     stack_trace_element_java_object.set_field(2, file_name);

@@ -29,11 +29,11 @@ use crate::{
 pub(crate) fn register_natives(registry: &mut NativeMethodsRegistry, io: Arc<dyn JvmIo>) {
     registry.register_temp_print(Arc::new(|vm, _, _, args| temp_print(vm, args)));
     register_noops(registry);
-    register_time_methods(registry, io.clone());
+    register_time_methods(registry, io);
     register_gc_methods(registry);
     register_native_repr_methods(registry);
-    register_reflection_methods(registry, io.clone());
-    register_throwable_methods(registry, io);
+    register_reflection_methods(registry);
+    register_throwable_methods(registry);
 }
 
 /// These various methods are noop, i.e. they do not do anything
@@ -120,7 +120,7 @@ fn register_native_repr_methods(registry: &mut NativeMethodsRegistry) {
 }
 
 /// Methods related to reflection
-fn register_reflection_methods(registry: &mut NativeMethodsRegistry, fs: Arc<dyn JvmIo>) {
+fn register_reflection_methods(registry: &mut NativeMethodsRegistry) {
     registry.register(
         "java/lang/Class",
         "getClassLoader0",
@@ -137,12 +137,12 @@ fn register_reflection_methods(registry: &mut NativeMethodsRegistry, fs: Arc<dyn
         "java/lang/Class",
         "getPrimitiveClass",
         "(Ljava/lang/String;)Ljava/lang/Class;",
-        Arc::new(move |vm, stack, _, args| get_primitive_class(vm, &*fs, stack, &args)),
+        Arc::new(|vm, stack, _, args| get_primitive_class(vm, stack, &args)),
     );
 }
 
 /// Methods of java.lang.Throwable
-fn register_throwable_methods(registry: &mut NativeMethodsRegistry, fs: Arc<dyn JvmIo>) {
+fn register_throwable_methods(registry: &mut NativeMethodsRegistry) {
     registry.register(
         "java/lang/Throwable",
         "fillInStackTrace",
@@ -160,7 +160,7 @@ fn register_throwable_methods(registry: &mut NativeMethodsRegistry, fs: Arc<dyn 
         "getStackTraceElement",
         "(I)Ljava/lang/StackTraceElement;",
         Arc::new(move |vm, call_stack, receiver, args| {
-            get_stack_trace_element(vm, &*fs, call_stack, receiver, args)
+            get_stack_trace_element(vm, call_stack, receiver, args)
         }),
     );
 }
@@ -249,13 +249,12 @@ fn get_class_loader(receiver: Option<AbstractObject>) -> MethodCallResult {
 
 fn get_primitive_class<'a>(
     vm: &mut Vm<'a>,
-    fs: &dyn JvmIo,
     stack: &mut CallStack<'a>,
     args: &[Value<'a>],
 ) -> MethodCallResult<'a> {
     let arg = expect_concrete_object_at(args, 0)?;
     let class_name = extract_str_from_java_lang_string(vm, &arg)?;
-    let java_lang_class_instance = new_java_lang_class_object(vm, fs, stack, &class_name)?;
+    let java_lang_class_instance = new_java_lang_class_object(vm, stack, &class_name)?;
     Ok(Some(Value::Object(java_lang_class_instance)))
 }
 
@@ -285,7 +284,6 @@ fn get_stack_trace_depth<'a>(
 
 fn get_stack_trace_element<'a>(
     vm: &mut Vm<'a>,
-    fs: &dyn JvmIo,
     call_stack: &mut CallStack<'a>,
     receiver: Option<AbstractObject<'a>>,
     args: Vec<Value<'a>>,
@@ -296,7 +294,7 @@ fn get_stack_trace_element<'a>(
         Some(stack_trace_elements) => {
             let stack_trace_element = &stack_trace_elements[index.into_usize_safe()].clone();
             let stack_trace_element_java_object =
-                new_java_lang_stack_trace_element_object(vm, fs, call_stack, stack_trace_element)?;
+                new_java_lang_stack_trace_element_object(vm, call_stack, stack_trace_element)?;
             Ok(Some(Value::Object(stack_trace_element_java_object)))
         }
         None => Err(MethodCallFailed::InternalError(

@@ -92,21 +92,18 @@ impl<'a> Vm<'a> {
         self.statics.get(&class_id).cloned()
     }
 
-    pub fn append_class_path(
-        &mut self,
-        fs: &dyn JvmIo,
-        class_path: &str,
-    ) -> Result<(), ClassPathParseError> {
-        self.class_manager.append_class_path(fs, class_path)
+    pub fn append_class_path(&mut self, class_path: &str) -> Result<(), ClassPathParseError> {
+        self.class_manager.append_class_path(&*self.fs, class_path)
     }
 
     pub fn get_or_resolve_class(
         &mut self,
-        fs: &dyn JvmIo,
         stack: &mut CallStack<'a>,
         class_name: &str,
     ) -> Result<ClassRef<'a>, MethodCallFailed<'a>> {
-        let class = self.class_manager.get_or_resolve_class(fs, class_name)?;
+        let class = self
+            .class_manager
+            .get_or_resolve_class(&*self.fs, class_name)?;
         if let ResolvedClass::NewClass(classes_to_init) = &class {
             for class_to_init in classes_to_init.to_initialize.iter() {
                 self.init_class(stack, class_to_init)?;
@@ -149,13 +146,12 @@ impl<'a> Vm<'a> {
 
     pub fn resolve_class_method(
         &mut self,
-        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
         class_name: &str,
         method_name: &str,
         method_type_descriptor: &str,
     ) -> Result<ClassAndMethod<'a>, MethodCallFailed<'a>> {
-        self.get_or_resolve_class(fs, call_stack, class_name)
+        self.get_or_resolve_class(call_stack, class_name)
             .and_then(|class| {
                 class
                     .find_method(method_name, method_type_descriptor)
@@ -184,7 +180,7 @@ impl<'a> Vm<'a> {
 
         // Generic bytecode method
         let mut frame = call_stack.add_frame(class_and_method, object, args)?;
-        let result = frame.as_mut().execute(self, &*self.fs.clone(), call_stack);
+        let result = frame.as_mut().execute(self, call_stack);
         call_stack
             .pop_frame()
             .expect("should be able to pop the frame we just pushed");
@@ -230,11 +226,10 @@ impl<'a> Vm<'a> {
 
     pub fn new_object(
         &mut self,
-        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
         class_name: &str,
     ) -> Result<AbstractObject<'a>, MethodCallFailed<'a>> {
-        let class = self.get_or_resolve_class(fs, call_stack, class_name)?;
+        let class = self.get_or_resolve_class(call_stack, class_name)?;
         Ok(self.new_object_of_class(class))
     }
 
