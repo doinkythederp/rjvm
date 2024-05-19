@@ -1,9 +1,10 @@
-use std::{
+use alloc::vec::Vec;
+use core::{
     ops::Index,
     slice::{Iter, IterMut, SliceIndex},
 };
 
-use thiserror::Error;
+use snafu::Snafu;
 
 use crate::value::Value;
 
@@ -17,11 +18,11 @@ pub struct ValueStack<'a> {
 }
 
 /// Errors returned from various stack operations
-#[derive(Error, Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Snafu, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ValueStackError {
-    #[error("trying to grow stack beyond maximum capacity")]
+    #[snafu(display("trying to grow stack beyond maximum capacity"))]
     MaximumCapacityReached,
-    #[error("cannot pop from an empty stack")]
+    #[snafu(display("cannot pop from an empty stack"))]
     CannotPopFromEmptyStack,
 }
 

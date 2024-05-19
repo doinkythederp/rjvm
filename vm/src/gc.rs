@@ -1,7 +1,12 @@
-use std::{alloc::Layout, fmt, fmt::Formatter, marker::PhantomData, ptr::null};
+use alloc::vec::Vec;
+use core::{
+    alloc::Layout,
+    fmt::{self, Formatter},
+    marker::PhantomData,
+    ptr::null,
+};
 
 use log::{debug, info};
-
 use rjvm_reader::{field_type::FieldType, type_conversion::ToUsizeSafe};
 
 use crate::{
@@ -36,7 +41,7 @@ impl fmt::Debug for MemoryChunk {
 impl MemoryChunk {
     fn new(capacity: usize) -> Self {
         let layout = Layout::from_size_align(capacity, 8).unwrap();
-        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+        let ptr = unsafe { alloc::alloc::alloc_zeroed(layout) };
         debug!(
             "allocated memory chunk of size {} at {:#0x}",
             capacity, ptr as u64
@@ -76,7 +81,7 @@ impl MemoryChunk {
 
         // Zero the memory, to attempt and catch bugs
         unsafe {
-            std::ptr::write_bytes(self.memory, 0, self.capacity);
+            core::ptr::write_bytes(self.memory, 0, self.capacity);
         }
     }
 }
@@ -149,7 +154,7 @@ impl<'a> ObjectAllocator<'a> {
         }
 
         // Swap regions and reset alloc pointer
-        std::mem::swap(&mut self.current, &mut self.other);
+        core::mem::swap(&mut self.current, &mut self.other);
         info!(
             "gc done; previous allocated memory = {}, new allocated memory = {}",
             self.other.used, self.current.used
@@ -188,7 +193,7 @@ impl<'a> ObjectAllocator<'a> {
                     .other
                     .alloc(header.size())
                     .map(|alloc_entry| {
-                        std::ptr::copy_nonoverlapping(
+                        core::ptr::copy_nonoverlapping(
                             referred_object_ptr,
                             alloc_entry.ptr,
                             header.size(),
@@ -198,7 +203,7 @@ impl<'a> ObjectAllocator<'a> {
                     .expect("should have enough space in the other region");
 
                 // Replace content of this object with forward reference to the new object
-                std::ptr::write(
+                core::ptr::write(
                     referred_object_ptr.add(ALLOC_HEADER_SIZE) as *mut *mut u8,
                     new_address,
                 );
@@ -236,7 +241,7 @@ impl<'a> ObjectAllocator<'a> {
                 field.name, field_value_ptr as u64
             );
 
-            if 0 == std::ptr::read(field_value_ptr as *const u64) {
+            if 0 == core::ptr::read(field_value_ptr as *const u64) {
                 // Skipping nulls
                 continue;
             }
@@ -370,20 +375,20 @@ impl<'a> ObjectAllocator<'a> {
     /// Assumes that the word after the old reference's header contains the address of the new
     /// object, as set by [visit].
     unsafe fn fix_reference(&self, field_value_ptr: *mut u8) -> *const u8 {
-        if 0 == std::ptr::read(field_value_ptr as *const u64) {
+        if 0 == core::ptr::read(field_value_ptr as *const u64) {
             // Skip nulls
             return null();
         }
 
         // Write new address, stored in the word after the header in the old object
-        let old_referred_object = std::ptr::read(field_value_ptr as *const *const u8);
+        let old_referred_object = core::ptr::read(field_value_ptr as *const *const u8);
         assert!(self.current.contains(old_referred_object));
 
         let word_after_header = old_referred_object.add(ALLOC_HEADER_SIZE) as *const *const u8;
-        let new_referred_object_address = std::ptr::read(word_after_header);
+        let new_referred_object_address = core::ptr::read(word_after_header);
         assert!(self.other.contains(new_referred_object_address));
 
-        std::ptr::write(
+        core::ptr::write(
             field_value_ptr as *mut *const u8,
             new_referred_object_address,
         );

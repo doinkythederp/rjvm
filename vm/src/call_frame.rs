@@ -1,5 +1,6 @@
-use log::{debug, warn};
+use alloc::{string::ToString, vec, vec::Vec};
 
+use log::{debug, warn};
 use rjvm_reader::{
     class_file_field::ClassFileField,
     class_file_method::ClassFileMethod,
@@ -10,6 +11,7 @@ use rjvm_reader::{
     program_counter::ProgramCounter,
     type_conversion::ToUsizeSafe,
 };
+use snafu::OptionExt;
 
 use crate::{
     abstract_object::{AbstractObject, ObjectKind},
@@ -21,16 +23,17 @@ use crate::{
     class_and_method::ClassAndMethod,
     class_resolver_by_id::ClassByIdResolver,
     exceptions::{JavaException, MethodCallFailed},
+    io::JvmIo,
     java_objects_creation::{new_java_lang_class_object, new_java_lang_string_object},
     object::Object,
     stack_trace_element::StackTraceElement,
-    value::{
-        Value,
-        Value::{Double, Float, Int, Long, Null},
-    },
+    value::Value::{self, Double, Float, Int, Long, Null},
     value_stack::ValueStack,
     vm::Vm,
-    vm_error::VmError,
+    vm_error::{
+        ClassNotFoundExceptionSnafu, FieldNotFoundExceptionSnafu, MethodNotFoundExceptionSnafu,
+        VmError,
+    },
 };
 
 /// A method call can return:
@@ -298,6 +301,7 @@ impl<'a> CallFrame<'a> {
     pub fn execute(
         &mut self,
         vm: &mut Vm<'a>,
+        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
     ) -> MethodCallResult<'a> {
         self.debug_start_execution();
@@ -312,7 +316,7 @@ impl<'a> CallFrame<'a> {
             // Move pc to the next instruction, _before_ executing it, since we want a "goto" to override this
             self.pc = ProgramCounter(new_address as u16);
 
-            let instruction_result = self.execute_instruction(vm, call_stack, instruction);
+            let instruction_result = self.execute_instruction(vm, fs, call_stack, instruction);
             match instruction_result {
                 Ok(ReturnFromMethod(return_value)) => return Ok(return_value),
                 Ok(ContinueMethodExecution) => { /* continue the loop */ }
@@ -324,6 +328,7 @@ impl<'a> CallFrame<'a> {
                 Err(MethodCallFailed::ExceptionThrown(exception)) => {
                     let exception_handler = self.find_exception_handler(
                         vm,
+                        fs,
                         call_stack,
                         executed_instruction_pc,
                         &exception,
@@ -349,6 +354,7 @@ impl<'a> CallFrame<'a> {
     fn execute_instruction(
         &mut self,
         vm: &mut Vm<'a>,
+        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
         instruction: Instruction,
     ) -> Result<InstructionCompleted<'a>, MethodCallFailed<'a>> {
@@ -408,8 +414,8 @@ impl<'a> CallFrame<'a> {
             Instruction::Lstore_2 => self.execute_lstore(2)?,
             Instruction::Lstore_3 => self.execute_lstore(3)?,
 
-            Instruction::Ldc(index) => self.execute_ldc(vm, call_stack, index as u16)?,
-            Instruction::Ldc_w(index) => self.execute_ldc(vm, call_stack, index)?,
+            Instruction::Ldc(index) => self.execute_ldc(vm, fs, call_stack, index as u16)?,
+            Instruction::Ldc_w(index) => self.execute_ldc(vm, fs, call_stack, index)?,
             Instruction::Ldc2_w(index) => self.execute_ldc_long_double(index)?,
 
             Instruction::Fload(index) => self.execute_fload(index.into_usize_safe())?,
@@ -457,7 +463,7 @@ impl<'a> CallFrame<'a> {
 
             Instruction::New(constant_index) => {
                 let new_object_class_name = self.get_constant_class_reference(constant_index)?;
-                let new_object = vm.new_object(call_stack, new_object_class_name)?;
+                let new_object = vm.new_object(fs, call_stack, new_object_class_name)?;
                 self.push(Value::Object(new_object))?;
             }
 
@@ -475,16 +481,16 @@ impl<'a> CallFrame<'a> {
             Instruction::Sipush(short_value) => self.push(Int(short_value as i32))?,
 
             Instruction::Invokespecial(constant_index) => {
-                self.invoke_method(vm, call_stack, constant_index, InvokeKind::Special)?
+                self.invoke_method(vm, fs, call_stack, constant_index, InvokeKind::Special)?
             }
             Instruction::Invokestatic(constant_index) => {
-                self.invoke_method(vm, call_stack, constant_index, InvokeKind::Static)?
+                self.invoke_method(vm, fs, call_stack, constant_index, InvokeKind::Static)?
             }
             Instruction::Invokevirtual(constant_index) => {
-                self.invoke_method(vm, call_stack, constant_index, InvokeKind::Virtual)?
+                self.invoke_method(vm, fs, call_stack, constant_index, InvokeKind::Virtual)?
             }
             Instruction::Invokeinterface(constant_index, _) => {
-                self.invoke_method(vm, call_stack, constant_index, InvokeKind::Interface)?
+                self.invoke_method(vm, fs, call_stack, constant_index, InvokeKind::Interface)?
             }
 
             Instruction::Return => {
@@ -503,19 +509,19 @@ impl<'a> CallFrame<'a> {
             Instruction::Dreturn => return Ok(ReturnFromMethod(self.execute_dreturn()?)),
 
             Instruction::Instanceof(constant_index) => {
-                self.execute_instanceof(vm, call_stack, constant_index)?
+                self.execute_instanceof(vm, fs, call_stack, constant_index)?
             }
             Instruction::Checkcast(constant_index) => {
-                self.execute_checkcast(vm, call_stack, constant_index)?
+                self.execute_checkcast(vm, fs, call_stack, constant_index)?
             }
 
             Instruction::Putfield(field_index) => self.execute_putfield(vm, field_index)?,
             Instruction::Putstatic(field_index) => {
-                self.execute_putstatic(vm, call_stack, field_index)?
+                self.execute_putstatic(vm, fs, call_stack, field_index)?
             }
             Instruction::Getfield(field_index) => self.execute_getfield(vm, field_index)?,
             Instruction::Getstatic(field_index) => {
-                self.execute_getstatic(vm, call_stack, field_index)?
+                self.execute_getstatic(vm, fs, call_stack, field_index)?
             }
 
             Instruction::Iadd => self.execute_int_math(|a, b| Ok(a.wrapping_add(b)))?,
@@ -663,7 +669,7 @@ impl<'a> CallFrame<'a> {
                 self.execute_newarray(vm, array_type)?;
             }
             Instruction::Anewarray(constant_index) => {
-                self.execute_anewarray(vm, call_stack, constant_index)?;
+                self.execute_anewarray(vm, fs, call_stack, constant_index)?;
             }
 
             Instruction::Arraylength => self.execute_array_length()?,
@@ -784,6 +790,7 @@ impl<'a> CallFrame<'a> {
     fn invoke_method(
         &mut self,
         vm: &mut Vm<'a>,
+        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
         constant_index: u16,
         kind: InvokeKind,
@@ -800,7 +807,7 @@ impl<'a> CallFrame<'a> {
         }
 
         let static_method_reference =
-            self.get_method_to_invoke_statically(vm, call_stack, method_reference, kind)?;
+            self.get_method_to_invoke_statically(vm, fs, call_stack, method_reference, kind)?;
         let (receiver, params, new_stack_len) =
             self.get_method_receiver_and_params(&static_method_reference)?;
         let class_and_method = match kind {
@@ -827,10 +834,10 @@ impl<'a> CallFrame<'a> {
     ) -> Result<(usize, &'a ClassFileField), VmError> {
         class
             .find_field(field_reference.field_name)
-            .ok_or(VmError::FieldNotFoundException(
-                field_reference.class_name.to_string(),
-                field_reference.field_name.to_string(),
-            ))
+            .context(FieldNotFoundExceptionSnafu {
+                class_name: field_reference.class_name,
+                field_name: field_reference.field_name,
+            })
     }
 
     generate_pop!(pop_int, Int, i32);
@@ -941,11 +948,12 @@ impl<'a> CallFrame<'a> {
     fn get_method_to_invoke_statically(
         &self,
         vm: &mut Vm<'a>,
+        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
         method_reference: MethodReference,
         kind: InvokeKind,
     ) -> Result<ClassAndMethod<'a>, MethodCallFailed<'a>> {
-        let class = vm.get_or_resolve_class(call_stack, method_reference.class_name)?;
+        let class = vm.get_or_resolve_class(fs, call_stack, method_reference.class_name)?;
         match kind {
             InvokeKind::Special | InvokeKind::Static => {
                 Self::get_method_of_class(class, method_reference)
@@ -966,13 +974,16 @@ impl<'a> CallFrame<'a> {
                 method_reference.method_name,
                 method_reference.type_descriptor,
             )
-            .ok_or(MethodCallFailed::InternalError(
-                VmError::MethodNotFoundException(
-                    class.name.to_string(),
-                    method_reference.method_name.to_string(),
-                    method_reference.type_descriptor.to_string(),
-                ),
-            ))
+            .ok_or_else(|| {
+                MethodCallFailed::InternalError(
+                    MethodNotFoundExceptionSnafu {
+                        class_name: &class.name,
+                        method_name: method_reference.method_name,
+                        method_type_descriptor: method_reference.type_descriptor,
+                    }
+                    .build(),
+                )
+            })
     }
 
     fn get_method_checking_superclasses<'b>(
@@ -995,11 +1006,12 @@ impl<'a> CallFrame<'a> {
                 curr_class = superclass;
             } else {
                 return Err(MethodCallFailed::InternalError(
-                    VmError::MethodNotFoundException(
-                        class.name.to_string(),
-                        method_reference.method_name.to_string(),
-                        method_reference.type_descriptor.to_string(),
-                    ),
+                    MethodNotFoundExceptionSnafu {
+                        class_name: &class.name,
+                        method_name: method_reference.method_name,
+                        method_type_descriptor: method_reference.type_descriptor,
+                    }
+                    .build(),
                 ));
             }
         }
@@ -1012,9 +1024,12 @@ impl<'a> CallFrame<'a> {
     ) -> Result<ClassAndMethod<'a>, MethodCallFailed<'a>> {
         match receiver {
             Some(receiver) if receiver.kind() == ObjectKind::Object => {
-                let receiver_class = vm.find_class_by_id(receiver.class_id()).ok_or(
-                    VmError::ClassNotFoundException(receiver.class_id().to_string()),
-                )?;
+                let receiver_class =
+                    vm.find_class_by_id(receiver.class_id()).with_context(|| {
+                        ClassNotFoundExceptionSnafu {
+                            class_name: receiver.class_id().to_string(),
+                        }
+                    })?;
                 let resolved_method = Self::get_method_checking_superclasses(
                     receiver_class,
                     MethodReference {
@@ -1334,6 +1349,7 @@ impl<'a> CallFrame<'a> {
     fn execute_ldc(
         &mut self,
         vm: &mut Vm<'a>,
+        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
         index: u16,
     ) -> Result<(), MethodCallFailed<'a>> {
@@ -1345,7 +1361,8 @@ impl<'a> CallFrame<'a> {
                 let constant = self.get_constant(*string_index)?;
                 match constant {
                     ConstantPoolEntry::Utf8(string) => {
-                        let string_object = new_java_lang_string_object(vm, call_stack, string)?;
+                        let string_object =
+                            new_java_lang_string_object(vm, fs, call_stack, string)?;
                         self.push(Value::Object(string_object))
                     }
                     _ => Err(MethodCallFailed::InternalError(
@@ -1357,7 +1374,8 @@ impl<'a> CallFrame<'a> {
                 let constant = self.get_constant(*class_index)?;
                 match constant {
                     ConstantPoolEntry::Utf8(class_name) => {
-                        let class_object = new_java_lang_class_object(vm, call_stack, class_name)?;
+                        let class_object =
+                            new_java_lang_class_object(vm, fs, call_stack, class_name)?;
                         self.push(Value::Object(class_object))
                     }
                     _ => Err(MethodCallFailed::InternalError(
@@ -1407,12 +1425,13 @@ impl<'a> CallFrame<'a> {
     fn execute_anewarray(
         &mut self,
         vm: &mut Vm<'a>,
+        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
         constant_index: u16,
     ) -> Result<(), MethodCallFailed<'a>> {
         let length = self.pop_int()?.into_usize_safe();
         let class_name = self.get_constant_class_reference(constant_index)?;
-        let class = vm.get_or_resolve_class(call_stack, class_name)?;
+        let class = vm.get_or_resolve_class(fs, call_stack, class_name)?;
         let elements_type = ArrayEntryType::Object(class.id);
 
         let array = vm.new_array(elements_type, length);
@@ -1509,22 +1528,24 @@ impl<'a> CallFrame<'a> {
     fn execute_instanceof(
         &mut self,
         vm: &mut Vm<'a>,
+        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
         constant_index: u16,
     ) -> Result<(), MethodCallFailed<'a>> {
         let value = self.pop()?;
-        let is_instance_of = self.is_instanceof(vm, call_stack, constant_index, &value)?;
+        let is_instance_of = self.is_instanceof(vm, fs, call_stack, constant_index, &value)?;
         self.push(Int(is_instance_of as i32))
     }
 
     fn execute_checkcast(
         &mut self,
         vm: &mut Vm<'a>,
+        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
         constant_index: u16,
     ) -> Result<(), MethodCallFailed<'a>> {
         let value = self.pop()?;
-        let is_instance_of = self.is_instanceof(vm, call_stack, constant_index, &value)?;
+        let is_instance_of = self.is_instanceof(vm, fs, call_stack, constant_index, &value)?;
         if is_instance_of {
             self.push(value)
         } else {
@@ -1536,6 +1557,7 @@ impl<'a> CallFrame<'a> {
     fn is_instanceof(
         &mut self,
         vm: &mut Vm<'a>,
+        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
         constant_index: u16,
         value: &Value<'a>,
@@ -1548,10 +1570,10 @@ impl<'a> CallFrame<'a> {
             if class_name.starts_with("[L") && class_name.ends_with(';') {
                 (
                     true,
-                    vm.get_or_resolve_class(call_stack, &class_name[2..class_name.len() - 1])?,
+                    vm.get_or_resolve_class(fs, call_stack, &class_name[2..class_name.len() - 1])?,
                 )
             } else {
-                (false, vm.get_or_resolve_class(call_stack, class_name)?)
+                (false, vm.get_or_resolve_class(fs, call_stack, class_name)?)
             }
         };
 
@@ -1633,11 +1655,12 @@ impl<'a> CallFrame<'a> {
     fn execute_getstatic(
         &mut self,
         vm: &mut Vm<'a>,
+        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
         field_index: u16,
     ) -> Result<(), MethodCallFailed<'a>> {
         let field_reference = self.get_constant_field_reference(field_index)?;
-        let object_class = vm.get_or_resolve_class(call_stack, field_reference.class_name)?;
+        let object_class = vm.get_or_resolve_class(fs, call_stack, field_reference.class_name)?;
         let (index, field) = Self::get_field(object_class, field_reference)?;
         let object = vm.get_static_instance(self.class_and_method.class.id);
         if let Some(object_ref) = object {
@@ -1656,11 +1679,12 @@ impl<'a> CallFrame<'a> {
     fn execute_putstatic(
         &mut self,
         vm: &mut Vm<'a>,
+        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
         field_index: u16,
     ) -> Result<(), MethodCallFailed<'a>> {
         let field_reference = self.get_constant_field_reference(field_index)?;
-        let object_class = vm.get_or_resolve_class(call_stack, field_reference.class_name)?;
+        let object_class = vm.get_or_resolve_class(fs, call_stack, field_reference.class_name)?;
         let (index, field) = Self::get_field(object_class, field_reference)?;
         let value = self.pop()?;
         Self::validate_type(vm, field.type_descriptor.clone(), &value)?;
@@ -1719,6 +1743,7 @@ impl<'a> CallFrame<'a> {
     fn find_exception_handler(
         &self,
         vm: &mut Vm<'a>,
+        fs: &dyn JvmIo,
         call_stack: &mut CallStack<'a>,
         executed_instruction_pc: ProgramCounter,
         exception: &JavaException<'a>,
@@ -1740,7 +1765,7 @@ impl<'a> CallFrame<'a> {
             match &catch_handler.catch_class {
                 None => return Ok(Some(catch_handler.handler_pc)),
                 Some(class_name) => {
-                    let catch_class = vm.get_or_resolve_class(call_stack, class_name)?;
+                    let catch_class = vm.get_or_resolve_class(fs, call_stack, class_name)?;
                     let exception_class = vm.get_class_by_id(exception.0.class_id())?;
                     if exception_class.is_subclass_of(catch_class) {
                         return Ok(Some(catch_handler.handler_pc));

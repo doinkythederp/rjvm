@@ -5,13 +5,24 @@ edition = "2021"
 
 [dependencies]
 rjvm_reader = { path = "../reader" }
-thiserror = "1"
 log = "0.4.17"
-test-log = "0.2.11"
-env_logger = "*"
-result = "1.0.0"
-typed-arena = "2.0.2"
-zip = { version = "0.6.4", features = ["deflate"] }
-indexmap = "1.9.2"
-bitfield-struct = "0.4.4"
+typed-arena = { version = "2.0.2", default-features = false }
+indexmap = { version = "2.2.6", default-features = false }
+bitfield-struct = "0.6.1"
 const_format = "0.2.31"
+hashbrown = "0.14.5"
+snafu = { version = "0.8.2", default-features = false, features = [
+    "unstable-core-error",
+] }
+no_std_io = { version = "0.6.0", features = ["alloc"] }
+unix_path = { version = "1.0.1", default-features = false, features = [
+    "alloc",
+] }
+bytes = { version = "1.6.0", default-features = false }
+zip_parser = "0.4.3"
+miniz_oxide = "0.7.3"
+ahash = { version = "0.8.11", default-features = false }
+
+[features]
+default = []
+std = ["no_std_io/std", "unix_path/std"]

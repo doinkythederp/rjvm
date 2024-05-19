@@ -1,18 +1,26 @@
-use std::{collections::HashMap, fmt, fmt::Formatter};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
+use core::{fmt, fmt::Formatter};
 
+use hashbrown::HashMap;
 use indexmap::IndexMap;
 use log::debug;
-use typed_arena::Arena;
-
 use rjvm_reader::{class_file::ClassFile, class_reader};
+use snafu::OptionExt;
+use typed_arena::Arena;
 
 use crate::{
     class::{Class, ClassId, ClassRef},
     class_loader::ClassLoader,
     class_path::{ClassPath, ClassPathParseError},
     class_resolver_by_id::ClassByIdResolver,
-    vm_error::VmError,
+    io::JvmIo,
+    vm_error::{ClassLoadingSnafu, ClassNotFoundExceptionSnafu, VmError},
 };
+
+pub type DefaultHashBuilder = core::hash::BuildHasherDefault<ahash::AHasher>;
 
 /// An object that will allocate and manage Class objects
 pub(crate) struct ClassManager<'a> {
@@ -83,39 +91,61 @@ impl<'a> ClassByIdResolver<'a> for ClassManager<'a> {
 }
 
 impl<'a> ClassManager<'a> {
-    pub fn append_class_path(&mut self, class_path: &str) -> Result<(), ClassPathParseError> {
-        self.class_path.push(class_path)
+    pub fn append_class_path(
+        &mut self,
+        fs: &dyn JvmIo,
+        class_path: &str,
+    ) -> Result<(), ClassPathParseError> {
+        self.class_path.push(fs, class_path)
     }
 
     pub fn find_class_by_name(&self, class_name: &str) -> Option<ClassRef<'a>> {
         self.classes_by_name.get(class_name).cloned()
     }
 
-    pub fn get_or_resolve_class(&mut self, class_name: &str) -> Result<ResolvedClass<'a>, VmError> {
+    pub fn get_or_resolve_class(
+        &mut self,
+        fs: &dyn JvmIo,
+        class_name: &str,
+    ) -> Result<ResolvedClass<'a>, VmError> {
         if let Some(already_loaded_class) = self.find_class_by_name(class_name) {
             Ok(ResolvedClass::AlreadyLoaded(already_loaded_class))
         } else {
-            self.resolve_and_load_class(class_name)
+            self.resolve_and_load_class(fs, class_name)
                 .map(ResolvedClass::NewClass)
         }
     }
 
     fn resolve_and_load_class(
         &mut self,
+        fs: &dyn JvmIo,
         class_name: &str,
     ) -> Result<ClassesToInitialize<'a>, VmError> {
         let class_file_bytes = self
             .class_path
-            .resolve(class_name)
-            .map_err(|err| VmError::ClassLoadingError(err.to_string()))?
-            .ok_or(VmError::ClassNotFoundException(class_name.to_string()))?;
-        let class_file = class_reader::read_buffer(&class_file_bytes)
-            .map_err(|err| VmError::ClassLoadingError(err.to_string()))?;
-        self.load_class(class_file)
+            .resolve(fs, class_name)
+            .map_err(|err| {
+                ClassLoadingSnafu {
+                    message: err.to_string(),
+                }
+                .build()
+            })?
+            .context(ClassNotFoundExceptionSnafu { class_name })?;
+        let class_file = class_reader::read_buffer(&class_file_bytes).map_err(|err| {
+            ClassLoadingSnafu {
+                message: err.to_string(),
+            }
+            .build()
+        })?;
+        self.load_class(fs, class_file)
     }
 
-    fn load_class(&mut self, class_file: ClassFile) -> Result<ClassesToInitialize<'a>, VmError> {
-        let referenced_classes = self.resolve_super_and_interfaces(&class_file)?;
+    fn load_class(
+        &mut self,
+        fs: &dyn JvmIo,
+        class_file: ClassFile,
+    ) -> Result<ClassesToInitialize<'a>, VmError> {
+        let referenced_classes = self.resolve_super_and_interfaces(fs, &class_file)?;
         let loaded_class = self.allocate(class_file, referenced_classes)?;
         self.register_loaded_class(loaded_class.resolved_class);
         Ok(loaded_class)
@@ -123,24 +153,27 @@ impl<'a> ClassManager<'a> {
 
     fn resolve_super_and_interfaces(
         &mut self,
+        fs: &dyn JvmIo,
         class_file: &ClassFile,
-    ) -> Result<IndexMap<String, ResolvedClass<'a>>, VmError> {
-        let mut resolved_classes: IndexMap<String, ResolvedClass<'a>> = Default::default();
+    ) -> Result<IndexMap<String, ResolvedClass<'a>, DefaultHashBuilder>, VmError> {
+        let mut resolved_classes: IndexMap<String, ResolvedClass<'a>, DefaultHashBuilder> =
+            Default::default();
         if let Some(superclass_name) = &class_file.superclass {
-            self.resolve_and_collect_class(superclass_name, &mut resolved_classes)?;
+            self.resolve_and_collect_class(fs, superclass_name, &mut resolved_classes)?;
         }
         for interface_name in class_file.interfaces.iter() {
-            self.resolve_and_collect_class(interface_name, &mut resolved_classes)?;
+            self.resolve_and_collect_class(fs, interface_name, &mut resolved_classes)?;
         }
         Ok(resolved_classes)
     }
 
     fn resolve_and_collect_class(
         &mut self,
+        fs: &dyn JvmIo,
         class_name: &str,
-        resolved_classes: &mut IndexMap<String, ResolvedClass<'a>>,
+        resolved_classes: &mut IndexMap<String, ResolvedClass<'a>, DefaultHashBuilder>,
     ) -> Result<(), VmError> {
-        let class = self.get_or_resolve_class(class_name)?;
+        let class = self.get_or_resolve_class(fs, class_name)?;
         resolved_classes.insert(class_name.to_string(), class);
         Ok(())
     }
@@ -148,7 +181,7 @@ impl<'a> ClassManager<'a> {
     fn allocate(
         &mut self,
         class_file: ClassFile,
-        referenced_classes: IndexMap<String, ResolvedClass<'a>>,
+        referenced_classes: IndexMap<String, ResolvedClass<'a>, DefaultHashBuilder>,
     ) -> Result<ClassesToInitialize<'a>, VmError> {
         let next_id = self.next_id;
         self.next_id += 1;
@@ -196,7 +229,7 @@ impl<'a> ClassManager<'a> {
     fn new_class(
         class_file: ClassFile,
         id: ClassId,
-        resolved_classes: &IndexMap<String, ResolvedClass<'a>>,
+        resolved_classes: &IndexMap<String, ResolvedClass<'a>, DefaultHashBuilder>,
     ) -> Result<Class<'a>, VmError> {
         let superclass = class_file
             .superclass

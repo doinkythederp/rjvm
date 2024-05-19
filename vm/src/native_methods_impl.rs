@@ -1,5 +1,6 @@
-use log::{debug, info};
+use alloc::{format, sync::Arc, vec::Vec};
 
+use log::{debug, info};
 use rjvm_reader::type_conversion::ToUsizeSafe;
 
 use crate::{
@@ -8,6 +9,7 @@ use crate::{
     call_frame::MethodCallResult,
     call_stack::CallStack,
     exceptions::MethodCallFailed,
+    io::JvmIo,
     java_objects_creation::{
         extract_str_from_java_lang_string, new_java_lang_class_object,
         new_java_lang_stack_trace_element_object,
@@ -24,14 +26,14 @@ use crate::{
 };
 
 /// Registers the built-in native methods
-pub(crate) fn register_natives(registry: &mut NativeMethodsRegistry) {
-    registry.register_temp_print(|vm, _, _, args| temp_print(vm, args));
+pub(crate) fn register_natives(registry: &mut NativeMethodsRegistry, io: Arc<dyn JvmIo>) {
+    registry.register_temp_print(Arc::new(|vm, _, _, args| temp_print(vm, args)));
     register_noops(registry);
-    register_time_methods(registry);
+    register_time_methods(registry, io.clone());
     register_gc_methods(registry);
     register_native_repr_methods(registry);
-    register_reflection_methods(registry);
-    register_throwable_methods(registry);
+    register_reflection_methods(registry, io.clone());
+    register_throwable_methods(registry, io);
 }
 
 /// These various methods are noop, i.e. they do not do anything
@@ -40,35 +42,39 @@ fn register_noops(registry: &mut NativeMethodsRegistry) {
         "java/lang/Object",
         "registerNatives",
         "()V",
-        |_, _, _, _| Ok(None),
+        Arc::new(|_, _, _, _| Ok(None)),
     );
     registry.register(
         "java/lang/System",
         "registerNatives",
         "()V",
-        |_, _, _, _| Ok(None),
+        Arc::new(|_, _, _, _| Ok(None)),
     );
-    registry.register("java/lang/Class", "registerNatives", "()V", |_, _, _, _| {
-        Ok(None)
-    });
+    registry.register(
+        "java/lang/Class",
+        "registerNatives",
+        "()V",
+        Arc::new(|_, _, _, _| Ok(None)),
+    );
     registry.register(
         "java/lang/ClassLoader",
         "registerNatives",
         "()V",
-        |_, _, _, _| Ok(None),
+        Arc::new(|_, _, _, _| Ok(None)),
     );
 }
 
 /// Methods to access the system clock
-fn register_time_methods(registry: &mut NativeMethodsRegistry) {
-    registry.register("java/lang/System", "nanoTime", "()J", |_, _, _, _| {
-        Ok(Some(Value::Long(get_nano_time())))
+fn register_time_methods(registry: &mut NativeMethodsRegistry, io: Arc<dyn JvmIo>) {
+    registry.register("java/lang/System", "nanoTime", "()J", {
+        let io = io.clone();
+        Arc::new(move |_, _, _, _| Ok(Some(Value::Long(get_nano_time(&*io)))))
     });
     registry.register(
         "java/lang/System",
         "currentTimeMillis",
         "()J",
-        |_, _, _, _| Ok(Some(Value::Long(get_current_time_millis()))),
+        Arc::new(move |_, _, _, _| Ok(Some(Value::Long(get_current_time_millis(&*io))))),
     );
 }
 
@@ -78,12 +84,17 @@ fn register_gc_methods(registry: &mut NativeMethodsRegistry) {
         "java/lang/System",
         "identityHashCode",
         "(Ljava/lang/Object;)I",
-        |_, _, _, args| identity_hash_code(args),
+        Arc::new(|_, _, _, args| identity_hash_code(args)),
     );
-    registry.register("java/lang/System", "gc", "()V", |vm, _, _, _| {
-        vm.run_garbage_collection()?;
-        Ok(None)
-    });
+    registry.register(
+        "java/lang/System",
+        "gc",
+        "()V",
+        Arc::new(|vm, _, _, _| {
+            vm.run_garbage_collection()?;
+            Ok(None)
+        }),
+    );
 }
 
 /// Native methods that deal with the internal representation of data
@@ -92,69 +103,71 @@ fn register_native_repr_methods(registry: &mut NativeMethodsRegistry) {
         "java/lang/System",
         "arraycopy",
         "(Ljava/lang/Object;ILjava/lang/Object;II)V",
-        |_, _, _, args| native_array_copy(args),
+        Arc::new(|_, _, _, args| native_array_copy(args)),
     );
     registry.register(
         "java/lang/Float",
         "floatToRawIntBits",
         "(F)I",
-        |_, _, _, args| float_to_raw_int_bits(&args),
+        Arc::new(|_, _, _, args| float_to_raw_int_bits(&args)),
     );
     registry.register(
         "java/lang/Double",
         "doubleToRawLongBits",
         "(D)J",
-        |_, _, _, args| double_to_raw_long_bits(&args),
+        Arc::new(|_, _, _, args| double_to_raw_long_bits(&args)),
     );
 }
 
 /// Methods related to reflection
-fn register_reflection_methods(registry: &mut NativeMethodsRegistry) {
+fn register_reflection_methods(registry: &mut NativeMethodsRegistry, fs: Arc<dyn JvmIo>) {
     registry.register(
         "java/lang/Class",
         "getClassLoader0",
         "()Ljava/lang/ClassLoader;",
-        |_, _, receiver, _| get_class_loader(receiver),
+        Arc::new(|_, _, receiver, _| get_class_loader(receiver)),
     );
     registry.register(
         "java/lang/Class",
         "desiredAssertionStatus0",
         "(Ljava/lang/Class;)Z",
-        |_, _, _, _| Ok(Some(Value::Int(1))),
+        Arc::new(|_, _, _, _| Ok(Some(Value::Int(1)))),
     );
     registry.register(
         "java/lang/Class",
         "getPrimitiveClass",
         "(Ljava/lang/String;)Ljava/lang/Class;",
-        |vm, stack, _, args| get_primitive_class(vm, stack, &args),
+        Arc::new(move |vm, stack, _, args| get_primitive_class(vm, &*fs, stack, &args)),
     );
 }
 
 /// Methods of java.lang.Throwable
-fn register_throwable_methods(registry: &mut NativeMethodsRegistry) {
+fn register_throwable_methods(registry: &mut NativeMethodsRegistry, fs: Arc<dyn JvmIo>) {
     registry.register(
         "java/lang/Throwable",
         "fillInStackTrace",
         "(I)Ljava/lang/Throwable;",
-        |vm, call_stack, receiver, _| fill_in_stack_trace(vm, call_stack, receiver),
+        Arc::new(|vm, call_stack, receiver, _| fill_in_stack_trace(vm, call_stack, receiver)),
     );
     registry.register(
         "java/lang/Throwable",
         "getStackTraceDepth",
         "()I",
-        |vm, _, receiver, _| get_stack_trace_depth(vm, receiver),
+        Arc::new(|vm, _, receiver, _| get_stack_trace_depth(vm, receiver)),
     );
     registry.register(
         "java/lang/Throwable",
         "getStackTraceElement",
         "(I)Ljava/lang/StackTraceElement;",
-        get_stack_trace_element,
+        Arc::new(move |vm, call_stack, receiver, args| {
+            get_stack_trace_element(vm, &*fs, call_stack, receiver, args)
+        }),
     );
 }
 
 /// Debug method that does a "println", useful since we do not have real I/O
 fn temp_print<'a>(vm: &mut Vm<'a>, args: Vec<Value<'a>>) -> MethodCallResult<'a> {
-    let arg = args.get(0).ok_or(VmError::ValidationException)?;
+    let arg = args.first().ok_or(VmError::ValidationException)?;
 
     let formatted = match arg {
         Value::Object(object) if object.kind() == ObjectKind::Object => {
@@ -236,12 +249,13 @@ fn get_class_loader(receiver: Option<AbstractObject>) -> MethodCallResult {
 
 fn get_primitive_class<'a>(
     vm: &mut Vm<'a>,
+    fs: &dyn JvmIo,
     stack: &mut CallStack<'a>,
     args: &[Value<'a>],
 ) -> MethodCallResult<'a> {
     let arg = expect_concrete_object_at(args, 0)?;
     let class_name = extract_str_from_java_lang_string(vm, &arg)?;
-    let java_lang_class_instance = new_java_lang_class_object(vm, stack, &class_name)?;
+    let java_lang_class_instance = new_java_lang_class_object(vm, fs, stack, &class_name)?;
     Ok(Some(Value::Object(java_lang_class_instance)))
 }
 
@@ -271,6 +285,7 @@ fn get_stack_trace_depth<'a>(
 
 fn get_stack_trace_element<'a>(
     vm: &mut Vm<'a>,
+    fs: &dyn JvmIo,
     call_stack: &mut CallStack<'a>,
     receiver: Option<AbstractObject<'a>>,
     args: Vec<Value<'a>>,
@@ -281,7 +296,7 @@ fn get_stack_trace_element<'a>(
         Some(stack_trace_elements) => {
             let stack_trace_element = &stack_trace_elements[index.into_usize_safe()].clone();
             let stack_trace_element_java_object =
-                new_java_lang_stack_trace_element_object(vm, call_stack, stack_trace_element)?;
+                new_java_lang_stack_trace_element_object(vm, fs, call_stack, stack_trace_element)?;
             Ok(Some(Value::Object(stack_trace_element_java_object)))
         }
         None => Err(MethodCallFailed::InternalError(

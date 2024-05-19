@@ -1,4 +1,11 @@
-use std::{collections::HashMap, fmt, fmt::Formatter};
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+use core::{fmt, fmt::Formatter};
+
+use hashbrown::HashMap;
 
 use crate::{
     abstract_object::AbstractObject, call_frame::MethodCallResult, call_stack::CallStack,
@@ -6,12 +13,14 @@ use crate::{
 };
 
 /// A callback that implements a java method marked with "native"
-pub type NativeCallback<'a> = fn(
-    &mut Vm<'a>,
-    &mut CallStack<'a>,
-    Option<AbstractObject<'a>>,
-    Vec<Value<'a>>,
-) -> MethodCallResult<'a>;
+pub type NativeCallback<'a> = Arc<
+    dyn Fn(
+        &mut Vm<'a>,
+        &mut CallStack<'a>,
+        Option<AbstractObject<'a>>,
+        Vec<Value<'a>>,
+    ) -> MethodCallResult<'a>,
+>;
 
 /// The registry of all known native methods
 #[derive(Default)]
@@ -68,7 +77,7 @@ impl<'a> NativeMethodsRegistry<'a> {
     ) -> Option<NativeCallback<'a>> {
         if class_name.starts_with("rjvm/") && method_name == "tempPrint" {
             // Hack: this method is valid for all classes in the rjvm package
-            self.temp_print_callback
+            self.temp_print_callback.clone()
         } else {
             self.methods
                 .get(&ClassMethodAndDescriptor {

@@ -1,11 +1,11 @@
-use std::{
+use alloc::{string::String, vec::Vec};
+use core::{
     fmt::{Debug, Formatter},
     marker::PhantomData,
     mem::size_of,
 };
 
 use bitfield_struct::bitfield;
-
 use rjvm_reader::{
     field_type::{BaseType, FieldType},
     type_conversion::ToUsizeSafe,
@@ -32,48 +32,42 @@ pub struct AbstractObject<'a> {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[repr(u8)]
 pub(crate) enum GcState {
     Unmarked,
     Marked,
 }
 
-// Needed for usage with bitfield
-impl From<u64> for GcState {
-    fn from(value: u64) -> Self {
-        match value {
+impl GcState {
+    pub const fn into_bits(self) -> u8 {
+        self as _
+    }
+    pub const fn from_bits(bits: u8) -> Self {
+        match bits {
             0 => Self::Unmarked,
             1 => Self::Marked,
-            _ => panic!("invalid value for GcState: {}", value),
+            _ => panic!("invalid value for GcState"),
         }
     }
 }
 
-impl From<GcState> for u64 {
-    fn from(value: GcState) -> Self {
-        value as u64
-    }
-}
-
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[repr(u8)]
 pub enum ObjectKind {
     Object,
     Array,
 }
 
-// Needed for usage with bitfield
-impl From<u64> for ObjectKind {
-    fn from(value: u64) -> Self {
-        match value {
+impl ObjectKind {
+    pub const fn into_bits(self) -> u8 {
+        self as _
+    }
+    pub const fn from_bits(bits: u8) -> Self {
+        match bits {
             0 => Self::Object,
             1 => Self::Array,
-            _ => panic!("invalid value for GcState: {}", value),
+            _ => panic!("invalid value for ObjectKind"),
         }
-    }
-}
-
-impl From<ObjectKind> for u64 {
-    fn from(value: ObjectKind) -> Self {
-        value as u64
     }
 }
 
@@ -144,7 +138,7 @@ impl<'a> AbstractObject<'a> {
     fn write_object_header(class: &Class, alloc_entry: &AllocEntry) {
         unsafe {
             let next_ptr = Self::write_alloc_header(alloc_entry, ObjectKind::Object);
-            std::ptr::write(
+            core::ptr::write(
                 next_ptr as *mut ObjectHeader,
                 ObjectHeader { class_id: class.id },
             );
@@ -170,7 +164,7 @@ impl<'a> AbstractObject<'a> {
     ) {
         unsafe {
             let next_ptr = Self::write_alloc_header(alloc_entry, ObjectKind::Array);
-            std::ptr::write(
+            core::ptr::write(
                 next_ptr as *mut ArrayHeader,
                 ArrayHeader {
                     elements_type,
@@ -182,7 +176,7 @@ impl<'a> AbstractObject<'a> {
 
     unsafe fn write_alloc_header(alloc_entry: &AllocEntry, kind: ObjectKind) -> *mut u8 {
         let next_ptr = alloc_entry.ptr as *mut AllocHeader;
-        std::ptr::write(
+        core::ptr::write(
             next_ptr,
             AllocHeader::new()
                 .with_kind(kind)
@@ -223,7 +217,7 @@ impl<'a> AbstractObject<'a> {
 }
 
 impl<'a> Debug for AbstractObject<'a> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "{:?} ptr {:#0x} size {}",
@@ -254,17 +248,17 @@ fn identity_hash_code(ptr: *mut u8) -> i32 {
     // since we'll store this in AllocHeader!
     let hash = (hash & ((1 << 30) - 1)) as u32;
 
-    unsafe { std::mem::transmute(hash) }
+    unsafe { core::mem::transmute(hash) }
 }
 
 unsafe fn write_value(ptr: *mut u8, value: Value) {
     match value {
-        Value::Int(int) => std::ptr::write(ptr as *mut i32, int),
-        Value::Long(long) => std::ptr::write(ptr as *mut i64, long),
-        Value::Float(float) => std::ptr::write(ptr as *mut f32, float),
-        Value::Double(double) => std::ptr::write(ptr as *mut f64, double),
-        Value::Uninitialized | Value::Null => std::ptr::write(ptr as *mut u64, 0),
-        Value::Object(obj) => std::ptr::write(ptr as *mut AbstractObject, obj),
+        Value::Int(int) => core::ptr::write(ptr as *mut i32, int),
+        Value::Long(long) => core::ptr::write(ptr as *mut i64, long),
+        Value::Float(float) => core::ptr::write(ptr as *mut f32, float),
+        Value::Double(double) => core::ptr::write(ptr as *mut f64, double),
+        Value::Uninitialized | Value::Null => core::ptr::write(ptr as *mut u64, 0),
+        Value::Object(obj) => core::ptr::write(ptr as *mut AbstractObject, obj),
     }
 }
 
@@ -274,13 +268,13 @@ unsafe fn read_value<'a>(ptr: *const u8, field_type: &FieldType) -> Value<'a> {
         | FieldType::Base(BaseType::Byte)
         | FieldType::Base(BaseType::Char)
         | FieldType::Base(BaseType::Short)
-        | FieldType::Base(BaseType::Int) => Value::Int(std::ptr::read(ptr as *const i32)),
-        FieldType::Base(BaseType::Long) => Value::Long(std::ptr::read(ptr as *const i64)),
-        FieldType::Base(BaseType::Float) => Value::Float(std::ptr::read(ptr as *const f32)),
-        FieldType::Base(BaseType::Double) => Value::Double(std::ptr::read(ptr as *const f64)),
-        FieldType::Object(_) | FieldType::Array(_) => match std::ptr::read(ptr as *const i64) {
+        | FieldType::Base(BaseType::Int) => Value::Int(core::ptr::read(ptr as *const i32)),
+        FieldType::Base(BaseType::Long) => Value::Long(core::ptr::read(ptr as *const i64)),
+        FieldType::Base(BaseType::Float) => Value::Float(core::ptr::read(ptr as *const f32)),
+        FieldType::Base(BaseType::Double) => Value::Double(core::ptr::read(ptr as *const f64)),
+        FieldType::Object(_) | FieldType::Array(_) => match core::ptr::read(ptr as *const i64) {
             0 => Value::Null,
-            _ => Value::Object(std::ptr::read(ptr as *const AbstractObject)),
+            _ => Value::Object(core::ptr::read(ptr as *const AbstractObject)),
         },
     }
 }
@@ -292,14 +286,14 @@ unsafe fn read_value2<'a>(ptr: *const u8, field_type: &ArrayEntryType) -> Value<
         | ArrayEntryType::Base(BaseType::Byte)
         | ArrayEntryType::Base(BaseType::Char)
         | ArrayEntryType::Base(BaseType::Short)
-        | ArrayEntryType::Base(BaseType::Int) => Value::Int(std::ptr::read(ptr as *const i32)),
-        ArrayEntryType::Base(BaseType::Long) => Value::Long(std::ptr::read(ptr as *const i64)),
-        ArrayEntryType::Base(BaseType::Float) => Value::Float(std::ptr::read(ptr as *const f32)),
-        ArrayEntryType::Base(BaseType::Double) => Value::Double(std::ptr::read(ptr as *const f64)),
+        | ArrayEntryType::Base(BaseType::Int) => Value::Int(core::ptr::read(ptr as *const i32)),
+        ArrayEntryType::Base(BaseType::Long) => Value::Long(core::ptr::read(ptr as *const i64)),
+        ArrayEntryType::Base(BaseType::Float) => Value::Float(core::ptr::read(ptr as *const f32)),
+        ArrayEntryType::Base(BaseType::Double) => Value::Double(core::ptr::read(ptr as *const f64)),
         ArrayEntryType::Object(_) | ArrayEntryType::Array => {
-            match std::ptr::read(ptr as *const i64) {
+            match core::ptr::read(ptr as *const i64) {
                 0 => Value::Null,
-                _ => Value::Object(std::ptr::read(ptr as *const AbstractObject)),
+                _ => Value::Object(core::ptr::read(ptr as *const AbstractObject)),
             }
         }
     }
@@ -411,7 +405,7 @@ pub fn string_from_char_array(array: AbstractObject) -> Result<String, VmError> 
         let ptr = array.data.add(ALLOC_HEADER_SIZE + ARRAY_HEADER_SIZE) as *const i64;
         for i in 0..len {
             let ptr = ptr.add(i);
-            let next_codepoint = std::ptr::read(ptr as *const i32) as u16;
+            let next_codepoint = core::ptr::read(ptr as *const i32) as u16;
             string_chars.push(next_codepoint);
         }
     }

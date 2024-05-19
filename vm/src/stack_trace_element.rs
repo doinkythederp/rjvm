@@ -1,8 +1,10 @@
-use rjvm_reader::line_number::LineNumber;
-use std::{
+use alloc::string::String;
+use core::{
     fmt,
     fmt::{Display, Formatter},
 };
+
+use rjvm_reader::line_number::LineNumber;
 
 /// One element of the stack trace information. Models java.lang.StackTraceElement
 #[derive(Debug, Clone)]
@@ -37,8 +39,11 @@ impl<'a> Display for StackTraceElement<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::stack_trace_element::StackTraceElement;
+    use alloc::{format, string::ToString};
+
     use rjvm_reader::line_number::LineNumber;
+
+    use crate::stack_trace_element::StackTraceElement;
 
     #[test]
     fn can_format_without_source_file_or_line_number() {

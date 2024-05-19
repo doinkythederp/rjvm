@@ -1,48 +1,58 @@
-use thiserror::Error;
+use alloc::string::String;
+
+use snafu::Snafu;
 
 use crate::value_stack::ValueStackError;
 
 /// Various errors that are thrown when executing java bytecode
 // TODO: this implementation is quite poor: we do not keep track of the origin
 //  of the errors, and we do not keep many details
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Snafu, PartialEq, Eq)]
+#[snafu(visibility(pub(crate)))]
 pub enum VmError {
-    #[error("unexpected error loading class: {0}")]
-    ClassLoadingError(String),
+    #[snafu(display("unexpected error loading class: {message}"))]
+    ClassLoadingError { message: String },
 
     /// TODO: this should become throwing a real `java.lang.NullPointerException`
-    #[error("null pointer exception")]
+    #[snafu(display("null pointer exception"))]
     NullPointerException,
 
     /// TODO: this should become throwing a real `java.lang.ClassNotFoundException`
-    #[error("class not found: {0}")]
-    ClassNotFoundException(String),
+    #[snafu(display("class not found: {class_name}"))]
+    ClassNotFoundException { class_name: String },
 
-    #[error("method not found: {0}.{1}#{2}")]
-    MethodNotFoundException(String, String, String),
+    #[snafu(display("method not found: {class_name}.{method_name}#{method_type_descriptor}"))]
+    MethodNotFoundException {
+        class_name: String,
+        method_name: String,
+        method_type_descriptor: String,
+    },
 
-    #[error("field not found: {0}.{1}")]
-    FieldNotFoundException(String, String),
+    #[snafu(display("field not found: {class_name}.{field_name}"))]
+    FieldNotFoundException {
+        class_name: String,
+        field_name: String,
+    },
 
     /// This is an overly generic error, abused to mean "something unexpected happened".
     /// It includes mostly errors that should be checked during the linking phase of the class file
     /// (which we have not implemented).
-    #[error("validation exception - invalid class file")]
+    #[snafu(display("validation exception - invalid class file"))]
     ValidationException,
 
     /// TODO: this should become throwing a real `java.lang.ArithmeticException`
-    #[error("arithmetic exception")]
+    #[snafu(display("arithmetic exception"))]
     ArithmeticException,
 
-    #[error("not yet implemented")]
+    #[snafu(display("not yet implemented"))]
     NotImplemented,
 
     /// TODO: this should become throwing a real `java.lang.ArrayIndexOutOfBoundsException`
-    #[error("array index out of bounds")]
+    #[snafu(display("array index out of bounds"))]
     ArrayIndexOutOfBoundsException,
 
     /// TODO: this should become throwing a real `java.lang.ClassCastException`
-    #[error("class cast exception")]
+    #[snafu(display("class cast exception"))]
     ClassCastException,
 }
 

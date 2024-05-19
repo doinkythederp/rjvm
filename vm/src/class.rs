@@ -1,4 +1,5 @@
-use std::{fmt, fmt::Formatter};
+use alloc::{string::String, vec::Vec};
+use core::{fmt, fmt::Formatter};
 
 use rjvm_reader::{
     class_access_flags::ClassAccessFlags, class_file_field::ClassFileField,

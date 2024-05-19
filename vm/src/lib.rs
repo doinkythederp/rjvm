@@ -1,3 +1,9 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+#![feature(error_in_core)]
+
+extern crate alloc;
+extern crate zip_parser as zip;
+
 pub mod abstract_object;
 pub mod alloc_entry;
 pub mod array;
@@ -14,6 +20,7 @@ mod class_resolver_by_id;
 pub mod exceptions;
 mod file_system_class_path_entry;
 mod gc;
+pub mod io;
 mod jar_file_class_path_entry;
 pub mod java_objects_creation;
 mod native_methods_impl;

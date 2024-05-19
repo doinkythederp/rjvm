@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use core::fmt::Debug;
 
 use rjvm_reader::field_type::{BaseType, FieldType};
 

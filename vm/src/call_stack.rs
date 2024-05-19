@@ -1,10 +1,10 @@
-use std::{fmt, fmt::Formatter};
-
-use typed_arena::Arena;
+use alloc::{vec, vec::Vec};
+use core::{fmt, fmt::Formatter};
 
 use rjvm_reader::{
     class_file_method::ClassFileMethodCode, method_flags::MethodFlags, type_conversion::ToUsizeSafe,
 };
+use typed_arena::Arena;
 
 use crate::{
     abstract_object::AbstractObject, call_frame::CallFrame, class_and_method::ClassAndMethod,
@@ -100,7 +100,7 @@ impl<'a> CallStack<'a> {
         let mut locals: Vec<Value<'a>> = receiver
             .map(Value::Object)
             .into_iter()
-            .chain(args.into_iter())
+            .chain(args)
             .collect();
         while locals.len() < code.max_locals.into_usize_safe() {
             locals.push(Value::Uninitialized);

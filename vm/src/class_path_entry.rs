@@ -1,9 +1,18 @@
-use std::{error::Error, fmt, fmt::Formatter};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+};
+use core::{error::Error, fmt, fmt::Formatter};
+
+use bytes::Bytes;
+
+use crate::io::JvmIo;
 
 /// Models an entry in the class path, i.e. a single Jar or directory
 pub trait ClassPathEntry: fmt::Debug {
     // TODO: should `class_name` be a newtype?
-    fn resolve(&self, class_name: &str) -> Result<Option<Vec<u8>>, ClassLoadingError>;
+    fn resolve(&self, fs: &dyn JvmIo, class_name: &str)
+        -> Result<Option<Bytes>, ClassLoadingError>;
 }
 
 /// Error returned when loading a class does not work
@@ -35,13 +44,13 @@ impl Error for ClassLoadingError {
 }
 
 // Test utilities used by multiple files
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub mod tests {
-    use crate::class_path_entry::ClassPathEntry;
+    use crate::{class_path_entry::ClassPathEntry, io::JvmIo};
 
-    pub fn assert_can_find_class(entry: &impl ClassPathEntry, class_name: &str) {
+    pub fn assert_can_find_class(entry: &impl ClassPathEntry, fs: &impl JvmIo, class_name: &str) {
         let buf = entry
-            .resolve(class_name)
+            .resolve(fs, class_name)
             .expect("should have been able to read file")
             .expect("should have been able to find file");
         let magic_number =
@@ -49,9 +58,13 @@ pub mod tests {
         assert_eq!(0xCAFEBABE, magic_number);
     }
 
-    pub fn assert_cannot_find_class(entry: &impl ClassPathEntry, class_name: &str) {
+    pub fn assert_cannot_find_class(
+        entry: &impl ClassPathEntry,
+        fs: &impl JvmIo,
+        class_name: &str,
+    ) {
         assert!(entry
-            .resolve(class_name)
+            .resolve(fs, class_name)
             .expect("should not have had any errors")
             .is_none());
     }
